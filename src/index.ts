@@ -51,7 +51,7 @@ interface Env {
   RAILWAY_API_KEY?: string;
   // Deployed Railway VM Server base URL (e.g. https://your-railway-vm.up.railway.app)
   RAILWAY_VM_SERVER_URL?: string;
-  // Cloudflare API token
+vier // Cloudflare API token
   CLOUDFLARE_API_TOKEN?: string;
 }
 
@@ -521,7 +521,12 @@ async function handleNoVNC(vmId: string, env: Env, corsHeaders: Record<string, s
     });
   }
 
-  // Create a simple, working NoVNC interface with Google login page
+  // Create a working NoVNC interface with real VM connection
+  const isRealVM = vm.createdVia && !vm.createdVia.includes('mock');
+  const vmProvider = vm.createdVia === 'google-cloud' ? 'Google Cloud' : 
+                    vm.createdVia === 'railway' ? 'Railway' : 
+                    vm.createdVia === 'cloudflare-workers' ? 'Cloudflare Workers' : 'Cloud Provider';
+  
   const novncHTML = `<!DOCTYPE html>
 <html>
 <head>
@@ -531,6 +536,7 @@ async function handleNoVNC(vmId: string, env: Env, corsHeaders: Record<string, s
         .header { background: #333; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
         .vm-title { font-size: 24px; margin: 0; }
         .vm-status { background: #10b981; color: white; padding: 5px 10px; border-radius: 15px; font-size: 12px; }
+        .vm-info { background: #444; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; }
         .browser { background: white; border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
         .browser-header { background: #f1f3f4; padding: 10px; border-bottom: 1px solid #dadce0; }
         .address-bar { background: white; border: 1px solid #dadce0; border-radius: 20px; padding: 8px 15px; margin: 0 10px; }
@@ -544,17 +550,33 @@ async function handleNoVNC(vmId: string, env: Env, corsHeaders: Record<string, s
         .controls { position: fixed; top: 20px; right: 20px; }
         .btn { background: rgba(0,0,0,0.7); color: white; border: none; padding: 8px 12px; border-radius: 4px; margin-left: 5px; cursor: pointer; }
         .btn:hover { background: rgba(0,0,0,0.9); }
+        .status-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+        .status-ready { background: #10b981; }
+        .status-error { background: #ef4444; }
+        .status-running { background: #f59e0b; }
     </style>
 </head>
 <body>
     <div class="header">
         <h1 class="vm-title">🖥️ ${vm.name}</h1>
-        <span class="vm-status">${vm.status.toUpperCase()}</span>
+        <span class="vm-status">
+            <span class="status-indicator status-${vm.status}"></span>
+            ${vm.status.toUpperCase()}
+        </span>
+    </div>
+
+    <div class="vm-info">
+        <strong>Provider:</strong> ${vmProvider} ${isRealVM ? '✅' : '⚠️ Mock'}<br>
+        <strong>Region:</strong> ${vm.region || 'Global'}<br>
+        <strong>IP:</strong> ${vm.publicIp || 'Not available'}<br>
+        <strong>Chrome:</strong> ${vm.chromeVersion || '120.0.0.0'}<br>
+        <strong>Node:</strong> ${vm.nodeVersion || '18.19.0'}
     </div>
 
     <div class="controls">
         <button class="btn" onclick="takeScreenshot()">📸 Screenshot</button>
         <button class="btn" onclick="refreshVM()">🔄 Refresh</button>
+        <button class="btn" onclick="openAgent()">🔧 Agent</button>
     </div>
 
     <div class="browser">
@@ -633,10 +655,38 @@ async function handleNoVNC(vmId: string, env: Env, corsHeaders: Record<string, s
             location.reload();
         }
 
+        function openAgent() {
+            const agentUrl = '${vm.agentUrl}';
+            if (agentUrl && agentUrl !== 'undefined') {
+                window.open(agentUrl, '_blank');
+            } else {
+                alert('Agent URL not available for this VM');
+            }
+        }
+
         function handleLogin() {
             const email = document.getElementById('email').value;
             console.log('Login attempt with email:', email);
-            alert('Login simulation complete! (This is a demo)');
+            
+            // For real VMs, try to navigate the browser
+            const agentUrl = '${vm.agentUrl}';
+            if (agentUrl && agentUrl !== 'undefined' && !agentUrl.includes('chrome-vm-workers')) {
+                fetch(\`\${agentUrl}/browser/navigate\`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: 'https://accounts.google.com/signin' })
+                }).then(response => response.json())
+                  .then(data => {
+                      console.log('Browser navigation result:', data);
+                      alert('Browser navigation sent to real VM!');
+                  })
+                  .catch(error => {
+                      console.error('Failed to navigate browser:', error);
+                      alert('Failed to navigate browser: ' + error.message);
+                  });
+            } else {
+                alert('Login simulation complete! (This is a demo - no real VM connected)');
+            }
         }
 
         // Auto-take screenshot every 10 seconds
