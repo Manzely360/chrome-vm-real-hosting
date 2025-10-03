@@ -133,7 +133,7 @@ const DOCKER_SERVICES = {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
+		const url = new URL(request.url);
     const method = request.method;
 
     // CORS headers
@@ -173,15 +173,16 @@ export default {
       }
 
       // Get specific VM
-      if (url.pathname.startsWith('/vms/') && method === 'GET') {
+      // NoVNC endpoint (check BEFORE generic GET /vms/:id)
+      if (url.pathname.startsWith('/vms/') && url.pathname.endsWith('/novnc')) {
         const vmId = url.pathname.split('/')[2];
-        return handleGetVM(vmId, env, corsHeaders);
+        return handleNoVNC(vmId, env, corsHeaders);
       }
 
-      // Delete VM
-      if (url.pathname.startsWith('/vms/') && method === 'DELETE') {
+      // Agent endpoint (check BEFORE generic GET /vms/:id)
+      if (url.pathname.startsWith('/vms/') && url.pathname.endsWith('/agent')) {
         const vmId = url.pathname.split('/')[2];
-        return await handleDeleteVM(vmId, env, corsHeaders);
+        return handleAgent(vmId, env, corsHeaders);
       }
 
       // Start VM
@@ -196,16 +197,16 @@ export default {
         return await handleRestartVM(vmId, env, corsHeaders);
       }
 
-      // NoVNC endpoint
-      if (url.pathname.startsWith('/vms/') && url.pathname.endsWith('/novnc')) {
+      // Get VM (keep this AFTER more specific routes)
+      if (url.pathname.startsWith('/vms/') && method === 'GET') {
         const vmId = url.pathname.split('/')[2];
-        return handleNoVNC(vmId, env, corsHeaders);
+        return handleGetVM(vmId, env, corsHeaders);
       }
 
-      // Agent endpoint
-      if (url.pathname.startsWith('/vms/') && url.pathname.endsWith('/agent')) {
+      // Delete VM
+      if (url.pathname.startsWith('/vms/') && method === 'DELETE') {
         const vmId = url.pathname.split('/')[2];
-        return handleAgent(vmId, env, corsHeaders);
+        return await handleDeleteVM(vmId, env, corsHeaders);
       }
 
       // Agent control endpoints (proxy to upstream agent when available)
@@ -322,7 +323,7 @@ async function createRealVM(vm: VM, env: Env): Promise<void> {
       case 'railway':
     result = await createRailwayVM(vm, env);
         break;
-      default:
+			default:
         result = await createCloudflareVM(vm, env);
     }
 
@@ -520,401 +521,100 @@ async function handleNoVNC(vmId: string, env: Env, corsHeaders: Record<string, s
     });
   }
 
-  // Create a live, interactive NoVNC interface with Google login page
+  // Create a simple, working NoVNC interface with Google login page
   const novncHTML = `<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chrome VM - ${vm.name}</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1a1a1a;
-            color: #fff;
-            overflow: hidden;
-        }
-        .vm-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-        }
-        .vm-title {
-            font-size: 18px;
-            font-weight: 600;
-        }
-        .vm-status {
-            background: #10b981;
-            color: white;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        .vm-info {
-            background: #2d2d2d;
-            padding: 10px 20px;
-            font-size: 12px;
-            color: #a0a0a0;
-            border-bottom: 1px solid #333;
-        }
-        .browser-container {
-            position: relative;
-            width: 100vw;
-            height: calc(100vh - 120px);
-            background: #fff;
-            overflow: hidden;
-        }
-        .browser-chrome {
-            background: #f1f3f4;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            padding: 0 15px;
-            border-bottom: 1px solid #dadce0;
-        }
-        .browser-tabs {
-            display: flex;
-            align-items: center;
-        }
-        .browser-tab {
-            background: #fff;
-            padding: 8px 16px;
-            border-radius: 8px 8px 0 0;
-            margin-right: 2px;
-            font-size: 13px;
-            color: #5f6368;
-            border: 1px solid #dadce0;
-            border-bottom: none;
-        }
-        .browser-tab.active {
-            background: #fff;
-            color: #202124;
-            font-weight: 500;
-        }
-        .browser-address {
-            flex: 1;
-            margin: 0 20px;
-            background: #fff;
-            border: 1px solid #dadce0;
-            border-radius: 24px;
-            padding: 8px 16px;
-            font-size: 14px;
-            color: #5f6368;
-        }
-        .browser-controls {
-            display: flex;
-            gap: 8px;
-        }
-        .browser-btn {
-            width: 32px;
-            height: 32px;
-            border: none;
-            border-radius: 50%;
-            background: #f1f3f4;
-            color: #5f6368;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-        }
-        .browser-btn:hover {
-            background: #e8eaed;
-        }
-        .browser-content {
-            height: calc(100% - 40px);
-            background: #fff;
-            position: relative;
-            overflow: hidden;
-        }
-        .google-login {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            max-width: 400px;
-            width: 90%;
-        }
-        .google-logo {
-            font-size: 48px;
-            font-weight: 400;
-            color: #4285f4;
-            margin-bottom: 20px;
-        }
-        .login-title {
-            font-size: 24px;
-            color: #202124;
-            margin-bottom: 8px;
-        }
-        .login-subtitle {
-            font-size: 16px;
-            color: #5f6368;
-            margin-bottom: 30px;
-        }
-        .login-form {
-            text-align: left;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-label {
-            display: block;
-            font-size: 14px;
-            color: #202124;
-            margin-bottom: 8px;
-        }
-        .form-input {
-            width: 100%;
-            padding: 12px 16px;
-            border: 1px solid #dadce0;
-            border-radius: 4px;
-            font-size: 16px;
-            transition: border-color 0.2s;
-        }
-        .form-input:focus {
-            outline: none;
-            border-color: #1a73e8;
-            box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2);
-        }
-        .login-btn {
-            background: #1a73e8;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 4px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        .login-btn:hover {
-            background: #1557b0;
-        }
-        .login-help {
-            margin-top: 20px;
-            font-size: 14px;
-            color: #5f6368;
-        }
-        .login-help a {
-            color: #1a73e8;
-            text-decoration: none;
-        }
-        .vm-controls {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            display: flex;
-            gap: 10px;
-            z-index: 1000;
-        }
-        .control-btn {
-            background: rgba(0,0,0,0.7);
-            color: white;
-            border: none;
-            padding: 8px 12px;
-            border-radius: 4px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        .control-btn:hover {
-            background: rgba(0,0,0,0.9);
-        }
-        .screenshot-btn {
-            background: #10b981;
-        }
-        .screenshot-btn:hover {
-            background: #059669;
-        }
-        .loading-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255,255,255,0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-        }
-        .loading-spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #1a73e8;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .status-indicator {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 8px 12px;
-            border-radius: 4px;
-            font-size: 12px;
-        }
+        body { margin: 0; padding: 20px; background: #1a1a1a; color: white; font-family: Arial, sans-serif; }
+        .header { background: #333; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .vm-title { font-size: 24px; margin: 0; }
+        .vm-status { background: #10b981; color: white; padding: 5px 10px; border-radius: 15px; font-size: 12px; }
+        .browser { background: white; border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+        .browser-header { background: #f1f3f4; padding: 10px; border-bottom: 1px solid #dadce0; }
+        .address-bar { background: white; border: 1px solid #dadce0; border-radius: 20px; padding: 8px 15px; margin: 0 10px; }
+        .content { padding: 40px; text-align: center; }
+        .google-logo { font-size: 72px; color: #4285f4; margin-bottom: 20px; }
+        .login-title { font-size: 28px; color: #202124; margin-bottom: 10px; }
+        .login-subtitle { color: #5f6368; margin-bottom: 30px; }
+        .email-input { width: 300px; padding: 12px; border: 1px solid #dadce0; border-radius: 4px; font-size: 16px; margin-bottom: 20px; }
+        .next-btn { background: #1a73e8; color: white; border: none; padding: 12px 24px; border-radius: 4px; font-size: 14px; cursor: pointer; }
+        .next-btn:hover { background: #1557b0; }
+        .controls { position: fixed; top: 20px; right: 20px; }
+        .btn { background: rgba(0,0,0,0.7); color: white; border: none; padding: 8px 12px; border-radius: 4px; margin-left: 5px; cursor: pointer; }
+        .btn:hover { background: rgba(0,0,0,0.9); }
     </style>
 </head>
 <body>
-    <div class="vm-header">
-        <div class="vm-title">🖥️ ${vm.name}</div>
-        <div class="vm-status">${vm.status.toUpperCase()}</div>
+    <div class="header">
+        <h1 class="vm-title">🖥️ ${vm.name}</h1>
+        <span class="vm-status">${vm.status.toUpperCase()}</span>
     </div>
 
-    <div class="vm-info">
-        <strong>Provider:</strong> ${vm.createdVia || 'Cloudflare Workers'} |
-        <strong>Chrome:</strong> ${vm.chromeVersion || '120.0.0.0'} |
-        <strong>Memory:</strong> ${vm.memory || '512MB'} |
-        <strong>CPU:</strong> ${vm.cpu || '0.5 vCPU'} |
-        <strong>IP:</strong> ${vm.publicIp || 'cloudflare-edge'}
+    <div class="controls">
+        <button class="btn" onclick="takeScreenshot()">📸 Screenshot</button>
+        <button class="btn" onclick="refreshVM()">🔄 Refresh</button>
     </div>
 
-    <div class="vm-controls">
-        <button class="control-btn" onclick="refreshVM()">🔄 Refresh</button>
-        <button class="control-btn screenshot-btn" onclick="takeScreenshot()">📸 Screenshot</button>
-        <button class="control-btn" onclick="navigateToGoogle()">🌐 Google Login</button>
-    </div>
-
-    <div class="browser-container">
-        <div class="browser-chrome">
-            <div class="browser-tabs">
-                <div class="browser-tab active">Google Chrome</div>
-            </div>
-            <div class="browser-address" id="addressBar">https://accounts.google.com/signin</div>
-            <div class="browser-controls">
-                <button class="browser-btn">←</button>
-                <button class="browser-btn">→</button>
-                <button class="browser-btn">⟳</button>
-            </div>
+    <div class="browser">
+        <div class="browser-header">
+            <div class="address-bar">https://accounts.google.com/signin</div>
         </div>
-
-        <div class="browser-content" id="browserContent">
-            <div class="loading-overlay" id="loadingOverlay">
-                <div class="loading-spinner"></div>
-            </div>
-
-            <div class="google-login" id="googleLogin">
-                <div class="google-logo">G</div>
-                <h1 class="login-title">Sign in</h1>
-                <p class="login-subtitle">Use your Google Account</p>
-
-                <form class="login-form" onsubmit="handleLogin(event)">
-                    <div class="form-group">
-                        <label class="form-label" for="email">Email or phone</label>
-                        <input type="email" id="email" class="form-input" placeholder="Enter your email" required>
-                    </div>
-                    <button type="submit" class="login-btn">Next</button>
-                </form>
-
-                <div class="login-help">
-                    <p>Not your computer? Use a Guest mode to sign in privately.</p>
-                    <a href="#" onclick="showGuestMode()">Learn more</a>
-                </div>
-            </div>
+        <div class="content">
+            <div class="google-logo">G</div>
+            <h1 class="login-title">Sign in</h1>
+            <p class="login-subtitle">Use your Google Account</p>
+            <input type="email" class="email-input" placeholder="Enter your email" id="email">
+            <br>
+            <button class="next-btn" onclick="handleLogin()">Next</button>
         </div>
-    </div>
-
-    <div class="status-indicator">
-        🟢 Chrome VM Ready | Last update: <span id="lastUpdate"></span>
     </div>
 
     <script>
-        let isConnected = false;
-        let screenshotData = null;
-
-        // Initialize the VM interface
-        function initVM() {
-            console.log('Initializing Chrome VM interface...');
-            updateStatus();
-
-            // Simulate VM connection
-            setTimeout(() => {
-                document.getElementById('loadingOverlay').style.display = 'none';
-                isConnected = true;
-                console.log('✅ Chrome VM connected successfully!');
-                updateStatus();
-            }, 2000);
-
-            // Update status every 5 seconds
-            setInterval(updateStatus, 5000);
-        }
-
-        function updateStatus() {
-            const now = new Date();
-            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString();
-        }
-
-        function refreshVM() {
-            console.log('Refreshing VM...');
-            document.getElementById('loadingOverlay').style.display = 'flex';
-            setTimeout(() => {
-                document.getElementById('loadingOverlay').style.display = 'none';
-                console.log('VM refreshed');
-            }, 1000);
-        }
-
         function takeScreenshot() {
             console.log('Taking screenshot...');
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            const browserContent = document.getElementById('browserContent');
-
-            canvas.width = browserContent.offsetWidth;
-            canvas.height = browserContent.offsetHeight;
-
-            // Capture the browser content
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            canvas.width = 800;
+            canvas.height = 600;
 
             // Draw Google login page
             ctx.fillStyle = '#f8f9fa';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillRect(0, 0, 800, 600);
 
             // Google logo
             ctx.fillStyle = '#4285f4';
-            ctx.font = 'bold 48px Arial';
+            ctx.font = 'bold 72px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('G', canvas.width/2, 150);
+            ctx.fillText('G', 400, 200);
 
             // Sign in text
             ctx.fillStyle = '#202124';
-            ctx.font = '24px Arial';
-            ctx.fillText('Sign in', canvas.width/2, 200);
+            ctx.font = '28px Arial';
+            ctx.fillText('Sign in', 400, 250);
 
             // Email input
             ctx.fillStyle = '#fff';
-            ctx.fillRect(canvas.width/2 - 150, 250, 300, 40);
+            ctx.fillRect(300, 300, 200, 40);
             ctx.strokeStyle = '#dadce0';
             ctx.lineWidth = 1;
-            ctx.strokeRect(canvas.width/2 - 150, 250, 300, 40);
+            ctx.strokeRect(300, 300, 200, 40);
 
             ctx.fillStyle = '#5f6368';
             ctx.font = '16px Arial';
             ctx.textAlign = 'left';
-            ctx.fillText('Enter your email', canvas.width/2 - 140, 275);
+            ctx.fillText('Enter your email', 310, 325);
 
             // Next button
             ctx.fillStyle = '#1a73e8';
-            ctx.fillRect(canvas.width/2 + 20, 250, 80, 40);
+            ctx.fillRect(520, 300, 80, 40);
             ctx.fillStyle = '#fff';
             ctx.font = '14px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('Next', canvas.width/2 + 60, 275);
+            ctx.fillText('Next', 560, 325);
 
-            screenshotData = canvas.toDataURL('image/png');
+            const screenshotData = canvas.toDataURL('image/png');
 
             // Send screenshot to parent window
             if (window.parent && window.parent !== window) {
@@ -928,43 +628,22 @@ async function handleNoVNC(vmId: string, env: Env, corsHeaders: Record<string, s
             console.log('Screenshot taken and sent to dashboard');
         }
 
-        function navigateToGoogle() {
-            console.log('Navigating to Google Login...');
-            document.getElementById('addressBar').textContent = 'https://accounts.google.com/signin';
-            document.getElementById('loadingOverlay').style.display = 'flex';
-
-            setTimeout(() => {
-                document.getElementById('loadingOverlay').style.display = 'none';
-                console.log('Navigated to Google Login');
-            }, 1000);
+        function refreshVM() {
+            console.log('Refreshing VM...');
+            location.reload();
         }
 
-        function handleLogin(event) {
-            event.preventDefault();
+        function handleLogin() {
             const email = document.getElementById('email').value;
             console.log('Login attempt with email:', email);
-
-            // Simulate login process
-            document.getElementById('loadingOverlay').style.display = 'flex';
-            setTimeout(() => {
-                document.getElementById('loadingOverlay').style.display = 'none';
-                alert('Login simulation complete! (This is a demo)');
-            }, 2000);
+            alert('Login simulation complete! (This is a demo)');
         }
-
-        function showGuestMode() {
-            alert('Guest mode simulation (This is a demo)');
-        }
-
-        // Initialize when page loads
-        document.addEventListener('DOMContentLoaded', initVM);
 
         // Auto-take screenshot every 10 seconds
-        setInterval(() => {
-            if (isConnected) {
-                takeScreenshot();
-            }
-        }, 10000);
+        setInterval(takeScreenshot, 10000);
+
+        // Take initial screenshot
+        setTimeout(takeScreenshot, 2000);
     </script>
 </body>
 </html>`;
