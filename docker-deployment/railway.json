@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.app/schemas/cli.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
+  },
+  "deploy": {
+    "startCommand": "node docker-service.js",
+    "healthcheckPath": "/",
+    "healthcheckTimeout": 300
+  }
+}
