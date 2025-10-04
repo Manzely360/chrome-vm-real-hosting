@@ -1,0 +1,12 @@
+{
+  "name": "chrome-vm-workers",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-10-04",
+  "d1_databases": [
+    {
+      "binding": "chrome_vm_db",
+      "database_name": "chrome-vm-db",
+      "database_id": "08da265e-cdd6-4c54-bff5-07471736232f"
+    }
+  ]
+}
